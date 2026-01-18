@@ -56,13 +56,17 @@ class GraphWidget(FigureCanvas):
 
     def setup_plot(self):
         self.axes.set_title("Titration Curve", fontsize=12, fontweight='bold')
-        self.axes.set_xlabel("Volume of Base Added (drops)", fontsize=10)
+        self.axes.set_xlabel("Volume of Base Added (mL)", fontsize=10)
         self.axes.set_ylabel("pH", fontsize=10)
         self.axes.set_ylim(0, 14)
         self.axes.set_xlim(0, 10)
         self.axes.grid(True, linestyle='--', alpha=0.5)
         self.axes.axhline(y=7, color='green', linestyle=':', alpha=0.5, label='Neutral pH')
         self.axes.axhline(y=8.2, color='purple', linestyle=':', alpha=0.5, label='Indicator Change')
+        self.axes.axvline(x=6.0, color='blue', linestyle='--',
+                  alpha=0.6, label='Equivalence Point')
+        self.axes.axhline(y=8.2, color='purple', linestyle=':',
+                        alpha=0.6, label='Indicator Transition')
 
     def update_graph(self, drops, ph):
         self.x_data.append(drops)
@@ -90,6 +94,9 @@ class TitrationAnimation(QGLWidget):
     """Main OpenGL animation widget for titration simulation"""
     def __init__(self, graph_callback):
         super().__init__()
+        self.ml_per_drop = 0.05  # 1 drop ≈ 0.05 mL
+        self.volume_ml = 0.0
+        self.eq_volume_ml = 6.0  # equivalence point (~6 mL)
         self.graph_callback = graph_callback
         self.droplets = []
         self.particles = []
@@ -154,15 +161,14 @@ class TitrationAnimation(QGLWidget):
             if drop.y < surface_y:
                 # Drop hit the liquid surface
                 self.total_drops += 1
-                self.mix_ratio += 0.005
+                self.volume_ml = self.total_drops * self.ml_per_drop
                 self.liquid_level = min(self.liquid_level + 0.0015, 0.7)
-                
-                # Sigmoid-style pH curve for realistic titration
-                # Models strong acid + strong base titration
-                self.ph_value = 1.0 + 13.0 / (1.0 + math.exp(-0.08 * (self.total_drops - 120)))
-                
-                # Update graph
-                self.graph_callback(self.total_drops, self.ph_value)
+
+                # Logistic titration curve (strong acid + strong base)
+                x = (self.volume_ml - self.eq_volume_ml) * 1.8
+                self.ph_value = 1.0 + 13.0 / (1.0 + math.exp(-x))
+
+                self.graph_callback(self.volume_ml, self.ph_value)
                 
                 # Create splash particles
                 for _ in range(6):
@@ -317,9 +323,9 @@ class TitrationAnimation(QGLWidget):
         self.ph_value = 1.0
         self.liquid_level = 0.15
         self.total_drops = 0
+        self.volume_ml = 0.0
         self.droplets.clear()
         self.particles.clear()
-        self.graph_callback = lambda d, p: None  # Temporarily disable
         self.burette_valve_open = False
 
 class ControlPanel(QWidget):
@@ -333,6 +339,11 @@ class ControlPanel(QWidget):
     def init_ui(self):
         layout = QVBoxLayout()
         
+        # stage
+        self.lbl_stage = QLabel("Stage: Acidic Region")
+        self.lbl_stage.setStyleSheet("font-size: 14px; color: #2c3e50; padding: 6px;")
+        layout.addWidget(self.lbl_stage)
+
         # Title
         title = QLabel("Interactive Titration Lab")
         title.setStyleSheet("font-weight: bold; font-size: 20px; color: #2c3e50; padding: 10px;")
@@ -426,6 +437,16 @@ class ControlPanel(QWidget):
         self.lbl_ph.setText(f"pH: {self.animation.ph_value:.2f}")
         self.lbl_drops.setText(f"Drops: {self.animation.total_drops}")
         
+        if self.animation.ph_value < 6.5:
+            stage = "Before Equivalence (Acidic)"
+        elif 6.5 <= self.animation.ph_value <= 7.5:
+            stage = "Near Equivalence Point"
+        else:
+            stage = "After Equivalence (Basic)"
+
+        self.lbl_stage.setText("Stage: " + stage)
+
+
         # Color-code pH label
         if self.animation.ph_value < 7:
             color = "#e74c3c"  # Red for acidic
