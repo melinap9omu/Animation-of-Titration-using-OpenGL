@@ -122,7 +122,10 @@ class TitrationAnimation(QGLWidget):
         self.total_drops = 0
         self.indicator_active = True
         self.reaction_type = "strong"  # or "weak"
-        
+        self.acid_molarity = 0.1
+        self.base_molarity = 0.1
+        self.acid_volume_ml = 50
+
         # Flask dimensions
         self.flask_bottom_y = -0.9
         self.flask_bottom_width = 0.7
@@ -178,14 +181,27 @@ class TitrationAnimation(QGLWidget):
                 self.volume_ml = self.total_drops * self.ml_per_drop
                 self.liquid_level = min(self.liquid_level + 0.0015, 0.7)
 
-                # Logistic titration curve (strong acid + strong base)
-                if self.reaction_type == "strong":
-                    x = (self.volume_ml - self.eq_volume_ml) * 1.8
-                    self.ph_value = 1.0 + 13.0 / (1.0 + math.exp(-x))
+                # Calculate pH from stoichiometry
+                added_base_ml = self.volume_ml
+                acid_moles = self.acid_molarity * (self.acid_volume_ml / 1000)
+                base_moles = self.base_molarity * (added_base_ml / 1000)
+
+                total_volume_L = (self.acid_volume_ml + added_base_ml) / 1000
+
+                if base_moles < acid_moles:
+                    # Before equivalence (acidic)
+                    remaining_H = acid_moles - base_moles
+                    H_conc = remaining_H / total_volume_L
+                    self.ph_value = -math.log10(H_conc)
+                elif abs(base_moles - acid_moles) < 1e-6:
+                    # At equivalence
+                    self.ph_value = 7.0
                 else:
-                    # Weak acid titration: starts higher and equivalence > 7
-                    x = (self.volume_ml - self.eq_volume_ml) * 1.3
-                    self.ph_value = 3.0 + 11.0 / (1.0 + math.exp(-x))
+                    # After equivalence (basic)
+                    excess_OH = base_moles - acid_moles
+                    OH_conc = excess_OH / total_volume_L
+                    pOH = -math.log10(OH_conc)
+                    self.ph_value = 14 - pOH
 
                 self.graph_callback(self.volume_ml, self.ph_value)
                 
@@ -346,6 +362,17 @@ class TitrationAnimation(QGLWidget):
             self.ph_value = 1.0
         self.reset_animation()
 
+    def set_parameters(self, acid_M, base_M, acid_vol):
+        self.acid_molarity = acid_M
+        self.base_molarity = base_M
+        self.acid_volume_ml = acid_vol
+
+        # Calculate equivalence volume
+        # M1 V1 = M2 V2
+        self.eq_volume_ml = (acid_M * acid_vol) / base_M
+
+        self.reset_animation()
+
     def reset_animation(self):
         self.mix_ratio = 0.0
         self.ph_value = 1.0
@@ -389,6 +416,40 @@ class ControlPanel(QWidget):
         self.lbl_drops.setStyleSheet("font-size: 16px; color: #34495e; padding: 5px;")
         layout.addWidget(self.lbl_drops)
         
+        # Parameters
+        param_group = QGroupBox("Experiment Parameters")
+        param_layout = QVBoxLayout()
+
+        self.lbl_acid = QLabel("Acid Molarity (M): 0.10")
+        self.lbl_base = QLabel("Base Molarity (M): 0.10")
+        self.lbl_vol = QLabel("Acid Volume (mL): 50")
+
+        self.slider_acid = QSlider(Qt.Horizontal)
+        self.slider_acid.setRange(1, 100)
+        self.slider_acid.setValue(10)
+
+        self.slider_base = QSlider(Qt.Horizontal)
+        self.slider_base.setRange(1, 100)
+        self.slider_base.setValue(10)
+
+        self.slider_vol = QSlider(Qt.Horizontal)
+        self.slider_vol.setRange(10, 100)
+        self.slider_vol.setValue(50)
+
+        self.slider_acid.valueChanged.connect(self.update_params)
+        self.slider_base.valueChanged.connect(self.update_params)
+        self.slider_vol.valueChanged.connect(self.update_params)
+
+        param_layout.addWidget(self.lbl_acid)
+        param_layout.addWidget(self.slider_acid)
+        param_layout.addWidget(self.lbl_base)
+        param_layout.addWidget(self.slider_base)
+        param_layout.addWidget(self.lbl_vol)
+        param_layout.addWidget(self.slider_vol)
+
+        param_group.setLayout(param_layout)
+        layout.addWidget(param_group)
+
         # Valve control
         control_group = QGroupBox("Controls")
         control_layout = QVBoxLayout()
@@ -483,6 +544,17 @@ class ControlPanel(QWidget):
                                     "font-size: 14px; padding: 10px; border-radius: 5px; }"
                                     "QPushButton:hover { background-color: #2980b9; }")
     
+    def update_params(self):
+        acid = self.slider_acid.value() / 100
+        base = self.slider_base.value() / 100
+        vol = self.slider_vol.value()
+
+        self.lbl_acid.setText(f"Acid Molarity (M): {acid:.2f}")
+        self.lbl_base.setText(f"Base Molarity (M): {base:.2f}")
+        self.lbl_vol.setText(f"Acid Volume (mL): {vol}")
+
+        self.animation.set_parameters(acid, base, vol)
+
     def update_labels(self):
         self.lbl_ph.setText(f"pH: {self.animation.ph_value:.2f}")
         self.lbl_drops.setText(f"Drops: {self.animation.total_drops}")
