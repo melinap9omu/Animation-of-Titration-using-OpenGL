@@ -83,6 +83,10 @@ class GraphWidget(FigureCanvas):
         self.axes.legend(fontsize=8)
         self.draw()
 
+        # Mark equivalence point
+        self.axes.scatter([6.0], [7.0], color="blue", s=60, zorder=5)
+        self.axes.text(6.1, 7.2, "Equivalence Point", fontsize=9, color="blue")
+
         # Stage annotations
         if ph < 6.5:
             self.axes.text(drops * 0.6, 2, "Acidic region", fontsize=9, color="black")
@@ -117,6 +121,7 @@ class TitrationAnimation(QGLWidget):
         self.ph_value = 1.0  # Starting pH (strong acid)
         self.total_drops = 0
         self.indicator_active = True
+        self.reaction_type = "strong"  # or "weak"
         
         # Flask dimensions
         self.flask_bottom_y = -0.9
@@ -174,8 +179,13 @@ class TitrationAnimation(QGLWidget):
                 self.liquid_level = min(self.liquid_level + 0.0015, 0.7)
 
                 # Logistic titration curve (strong acid + strong base)
-                x = (self.volume_ml - self.eq_volume_ml) * 1.8
-                self.ph_value = 1.0 + 13.0 / (1.0 + math.exp(-x))
+                if self.reaction_type == "strong":
+                    x = (self.volume_ml - self.eq_volume_ml) * 1.8
+                    self.ph_value = 1.0 + 13.0 / (1.0 + math.exp(-x))
+                else:
+                    # Weak acid titration: starts higher and equivalence > 7
+                    x = (self.volume_ml - self.eq_volume_ml) * 1.3
+                    self.ph_value = 3.0 + 11.0 / (1.0 + math.exp(-x))
 
                 self.graph_callback(self.volume_ml, self.ph_value)
                 
@@ -327,6 +337,15 @@ class TitrationAnimation(QGLWidget):
     def toggle_indicator(self):
         self.indicator_active = not self.indicator_active
     
+    def toggle_reaction_type(self):
+        if self.reaction_type == "strong":
+            self.reaction_type = "weak"
+            self.ph_value = 3.0  # weak acid starts higher pH
+        else:
+            self.reaction_type = "strong"
+            self.ph_value = 1.0
+        self.reset_animation()
+
     def reset_animation(self):
         self.mix_ratio = 0.0
         self.ph_value = 1.0
@@ -395,6 +414,12 @@ class ControlPanel(QWidget):
         self.btn_indicator.clicked.connect(self.animation.toggle_indicator)
         control_layout.addWidget(self.btn_indicator)
         
+        # Reaction type toggle
+        self.btn_reaction = QPushButton("Reaction: Strong Acid vs Strong Base")
+        self.btn_reaction.setStyleSheet("padding: 8px; font-size: 12px;")
+        self.btn_reaction.clicked.connect(self.toggle_reaction)
+        control_layout.addWidget(self.btn_reaction)
+
         # Reset button
         self.btn_reset = QPushButton("Reset Experiment")
         self.btn_reset.setStyleSheet("QPushButton { background-color: #e67e22; color: white; "
@@ -442,6 +467,13 @@ class ControlPanel(QWidget):
                                         "font-size: 14px; padding: 10px; border-radius: 5px; }"
                                         "QPushButton:hover { background-color: #2980b9; }")
     
+    def toggle_reaction(self):
+        self.animation.toggle_reaction_type()
+        if self.animation.reaction_type == "strong":
+            self.btn_reaction.setText("Reaction: Strong Acid vs Strong Base")
+        else:
+            self.btn_reaction.setText("Reaction: Weak Acid vs Strong Base")
+
     def reset_experiment(self):
         self.animation.reset_animation()
         self.graph.reset()
