@@ -83,12 +83,21 @@ class GraphWidget(FigureCanvas):
         self.axes.legend(fontsize=8)
         self.draw()
 
+        # Stage annotations
+        if ph < 6.5:
+            self.axes.text(drops * 0.6, 2, "Acidic region", fontsize=9, color="black")
+        elif 6.5 <= ph <= 7.5:
+            self.axes.text(drops * 0.6, 10, "Equivalence point region", fontsize=9, color="black")
+        else:
+            self.axes.text(drops * 0.6, 12, "Excess base region", fontsize=9, color="black")
+
     def reset(self):
         self.x_data = []
         self.y_data = []
         self.axes.clear()
         self.setup_plot()
         self.draw()
+
 
 class TitrationAnimation(QGLWidget):
     """Main OpenGL animation widget for titration simulation"""
@@ -398,7 +407,7 @@ class ControlPanel(QWidget):
         layout.addWidget(control_group)
         
         # Info section
-        info = QLabel("Simulates adding NaOH (base)\nto HCl (acid) with\nphenolphthalein indicator")
+        info = QLabel("Strong Acid (HCl) vs Strong Base (NaOH)\nIndicator: Phenolphthalein")
         info.setStyleSheet("font-size: 11px; color: #7f8c8d; padding: 10px;")
         info.setWordWrap(True)
         layout.addWidget(info)
@@ -406,6 +415,15 @@ class ControlPanel(QWidget):
         layout.addStretch()
         self.setLayout(layout)
         
+        # Theory box
+        self.theory_box = QLabel("")
+        self.theory_box.setWordWrap(True)
+        self.theory_box.setStyleSheet(
+            "font-size: 12px; color: #2c3e50; background-color: #f8f9fa; "
+            "padding: 10px; border-radius: 6px; border: 1px solid #dcdde1;"
+        )
+        layout.addWidget(self.theory_box)
+
         # Update timer
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_labels)
@@ -446,6 +464,23 @@ class ControlPanel(QWidget):
 
         self.lbl_stage.setText("Stage: " + stage)
 
+        if "Before" in stage:
+            theory = (
+                "The solution is strongly acidic. Added NaOH is being neutralized by excess HCl.\n"
+                "pH increases slowly because H+ ions are still in large excess."
+            )
+        elif "Near" in stage:
+            theory = (
+                "The equivalence point is near. Small additions of base cause a rapid pH increase.\n"
+                "Moles of acid ≈ moles of base."
+            )
+        else:
+            theory = (
+                "All acid has been neutralized. The solution now contains excess OH⁻ ions.\n"
+                "pH increases slowly again."
+            )
+
+        self.theory_box.setText("Theory:\n" + theory)
 
         # Color-code pH label
         if self.animation.ph_value < 7:
