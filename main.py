@@ -142,7 +142,14 @@ class TitrationAnimation(QGLWidget):
         self.ph_value = 1.0  # Starting pH (strong acid)
         self.total_drops = 0
         self.indicator_active = True
-        self.reaction_type = "SA_SB"  # or "weak"
+        self.reaction_index = 0
+        self.reactions = [
+            "Strong Acid - Strong Base",
+            "Weak Acid - Strong Base",
+            "Strong Acid - Weak Base",
+            "Weak Acid - Weak Base"
+        ]
+        # or "weak"
         self.acid_molarity = 0.1
         self.base_molarity = 0.1
         self.acid_volume_ml = 50
@@ -473,9 +480,7 @@ class TitrationAnimation(QGLWidget):
         self.indicator_active = not self.indicator_active
     
     def toggle_reaction_type(self):
-        order = ["SA_SB", "WA_SB", "SA_WB", "WA_WB"]
-        i = order.index(self.reaction_type)
-        self.reaction_type = order[(i + 1) % len(order)]
+        self.reaction_index = (self.reaction_index + 1) % 4
         self.reset_animation()
 
     def set_parameters(self, acid_M, base_M, acid_vol):
@@ -491,7 +496,11 @@ class TitrationAnimation(QGLWidget):
 
     def reset_animation(self):
         self.mix_ratio = 0.0
-        self.ph_value = 1.0
+        rtype = self.reactions[self.reaction_index]
+        if "Weak Acid" in rtype:
+            self.ph_value = 3.0
+        else:
+            self.ph_value = 1.0
         self.liquid_level = 0.15
         self.total_drops = 0
         self.volume_ml = 0.0
@@ -647,16 +656,8 @@ class ControlPanel(QWidget):
     def toggle_reaction(self):
         self.animation.toggle_reaction_type()
 
-        rt = self.animation.reaction_type
-
-        if rt == "SA_SB":
-            self.btn_reaction.setText("Strong Acid vs Strong Base")
-        elif rt == "WA_SB":
-            self.btn_reaction.setText("Weak Acid vs Strong Base")
-        elif rt == "SA_WB":
-            self.btn_reaction.setText("Strong Acid vs Weak Base")
-        else:
-            self.btn_reaction.setText("Weak Acid vs Weak Base")
+        reaction = self.animation.reactions[self.animation.reaction_index]
+        self.btn_reaction.setText("Reaction: " + reaction)
 
     def reset_experiment(self):
         self.animation.reset_animation()
