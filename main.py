@@ -128,9 +128,6 @@ class TitrationAnimation(QGLWidget):
     """Main OpenGL animation widget for titration simulation"""
     def __init__(self, graph_callback):
         super().__init__()
-        self.ml_per_drop = 0.05  # 1 drop ≈ 0.05 mL
-        self.volume_ml = 0.0
-        self.eq_volume_ml = 6.0  # equivalence point (~6 mL)
         self.graph_callback = graph_callback
         self.droplets = []
         self.particles = []
@@ -142,12 +139,23 @@ class TitrationAnimation(QGLWidget):
         self.ph_value = 1.0  # Starting pH (strong acid)
         self.total_drops = 0
         self.indicator_active = True
-        self.reaction_type = "SA_SB"  # or "weak"
+        
+        self.ml_per_drop = 0.05
+        self.volume_ml = 0.0
+
         self.acid_molarity = 0.1
         self.base_molarity = 0.1
         self.acid_volume_ml = 50
-        self.rot_y = 0
-        self.last_mouse_pos = None
+        self.reaction_index = 0
+
+        self.reactions = [
+            "Strong Acid - Strong Base",
+            "Weak Acid - Strong Base",
+            "Strong Acid - Weak Base",
+            "Weak Acid - Weak Base"
+        ]
+
+        self.reaction_type = "SA_SB"
 
         # Flask dimensions
         self.flask_bottom_y = -0.9
@@ -165,51 +173,16 @@ class TitrationAnimation(QGLWidget):
 
     def initializeGL(self):
         glClearColor(0.96, 0.96, 0.98, 1.0)
-        glEnable(GL_LINE_SMOOTH)
-        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
-        glEnable(GL_NORMALIZE)
-        glEnable(GL_LIGHTING)
-        glEnable(GL_LIGHT0)
-        glEnable(GL_COLOR_MATERIAL)
-        glEnable(GL_DEPTH_TEST)
-        glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE)
-
-        glLightfv(GL_LIGHT0, GL_POSITION, [2, 5, 5, 1])
-        glLightfv(GL_LIGHT0, GL_DIFFUSE, [1, 1, 1, 1])
-        glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.3, 1])
-        glLightfv(GL_LIGHT0, GL_SPECULAR, [1, 1, 1, 1])
-
-        glDepthFunc(GL_LEQUAL)
         glEnable(GL_BLEND)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-        glDisable(GL_CULL_FACE)
-
-    def draw_disk(self, r, slices=32):
-        quad = gluNewQuadric()
-        gluDisk(quad, 0, r, slices, 1)
-
-    def draw_lathed_surface(self, profile, slices=64):
-        for i in range(len(profile) - 1):
-            y1, r1 = profile[i]
-            y2, r2 = profile[i + 1]
-
-            glBegin(GL_QUAD_STRIP)
-            for j in range(slices + 1):
-                theta = 2 * math.pi * j / slices
-                c = math.cos(theta)
-                s = math.sin(theta)
-
-                glNormal3f(c, 0, s)
-                glVertex3f(r1 * c, y1, r1 * s)
-                glVertex3f(r2 * c, y2, r2 * s)
-            glEnd()
+        glEnable(GL_LINE_SMOOTH)
+        glHint(GL_LINE_SMOOTH_HINT, GL_NICEST)
 
     def resizeGL(self, w, h):
         glViewport(0, 0, w, h)
         glMatrixMode(GL_PROJECTION)
         glLoadIdentity()
-        glOrtho(-2, 2, -2, 2, -10, 10)
-        glMatrixMode(GL_MODELVIEW)
+        gluOrtho2D(-1, 1, -1, 1)
 
     def get_flask_width_at_height(self, y):
         """Calculate flask width at a given height (linear interpolation)"""
@@ -227,7 +200,7 @@ class TitrationAnimation(QGLWidget):
         
         # Spawn droplets based on valve state and drop rate
         if self.burette_valve_open and random.random() < self.drop_rate:
-            self.droplets.append(Droplet(0.0, 0.8))
+            self.droplets.append(Droplet(self.burette_tip_x, self.burette_tip_y))
         
         # Update droplets
         surface_y = self.flask_bottom_y + self.liquid_level
@@ -236,9 +209,10 @@ class TitrationAnimation(QGLWidget):
             if drop.y < surface_y:
                 # Drop hit the liquid surface
                 self.total_drops += 1
-                self.volume_ml = self.total_drops * self.ml_per_drop
+                self.mix_ratio += 0.005
                 self.liquid_level = min(self.liquid_level + 0.0015, 0.7)
-
+                self.volume_ml = self.total_drops * self.ml_per_drop
+                
                 # CHEMISTRY MODEL
                 Ka = 1.8e-5   # weak acid (acetic acid)
                 Kb = 1.8e-5   # weak base (ammonia)
@@ -314,6 +288,9 @@ class TitrationAnimation(QGLWidget):
                     else:
                         self.ph_value = 8.0
                 
+                # Update graph
+                self.graph_callback(self.volume_ml, self.ph_value)
+                
                 # Create splash particles
                 for _ in range(6):
                     self.particles.append(Particle(drop.x, surface_y))
@@ -344,124 +321,114 @@ class TitrationAnimation(QGLWidget):
             return (r, g, b)
 
     def paintGL(self):
-        glDisable(GL_LIGHTING)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        glClear(GL_COLOR_BUFFER_BIT)
         glLoadIdentity()
-        glTranslatef(0, -0.3, -5.5)
-        glRotatef(-10, 1, 0, 0)
 
-        # STAND
-        glColor3f(0.15, 0.15, 0.15)
-
-        # Base
-        glPushMatrix()
-        glTranslatef(1.2, -1.25, 0)
-        glScalef(0.8, 0.05, 0.8)
-        self.draw_disk(1.0)
-        glPopMatrix()
-
-        # Vertical rod
-        glPushMatrix()
-        glTranslatef(1.2, -1.25, 0)
-        self.draw_cylinder(0.05, 2.6)
-        glPopMatrix()
-
-        # Horizontal arm
-        glPushMatrix()
-        glTranslatef(1.2, 0.8, 0)
-        glRotatef(90, 0, 0, 1)
-        self.draw_cylinder(0.04, 1.0)
-        glPopMatrix()
-
-        # Clamp block
-        glPushMatrix()
-        glTranslatef(0.7, 0.8, 0)
-        glScalef(0.15, 0.15, 0.15)
-        self.draw_sphere(1)
-        glPopMatrix()
-
-        # BURETTE
-        glColor4f(0.85, 0.92, 1.0, 0.25)
-        glPushMatrix()
-        glTranslatef(0.0, 1.0, 0)
-        self.draw_cylinder(0.08, 2.4)
-        glPopMatrix()
-
-        # Tip
-        glColor3f(0.6, 0.6, 0.6)
-        glPushMatrix()
-        glTranslatef(0.0, -0.2, 0)
-        self.draw_cylinder(0.025, 0.25)
-        glPopMatrix()
-
-        # SHADOW
-        glColor4f(0, 0, 0, 0.2)
-        glPushMatrix()
-        glTranslatef(0.1, -1.25, -0.5)
-        glScalef(1.2, 0.3, 1)
-        self.draw_disk(0.9)
-        glPopMatrix()
-
-        # FLASK BODY (2.5D)
-        glColor4f(0.7, 0.85, 1.0, 0.5)
+        # 1. Draw liquid in flask
+        r, g, b = self.get_solution_color()
+        glColor4f(r, g, b, 0.85)
+        
+        liquid_height = self.liquid_level
+        liquid_top_y = self.flask_bottom_y + liquid_height
+        bottom_half_width = self.get_flask_width_at_height(self.flask_bottom_y)
+        top_half_width = self.get_flask_width_at_height(liquid_top_y)
+        
         glBegin(GL_POLYGON)
-        glVertex2f(-0.6, -1.0)
-        glVertex2f(-0.8, -0.2)
-        glVertex2f(-0.3, 0.3)
-        glVertex2f(0.3, 0.3)
-        glVertex2f(0.8, -0.2)
-        glVertex2f(0.6, -1.0)
+        glVertex2f(-bottom_half_width, self.flask_bottom_y)
+        glVertex2f(bottom_half_width, self.flask_bottom_y)
+        glVertex2f(top_half_width, liquid_top_y)
+        glVertex2f(-top_half_width, liquid_top_y)
         glEnd()
 
-        # FLASK OUTLINE
-        glColor3f(0,0,0)
-        glLineWidth(2)
-        glBegin(GL_LINE_LOOP)
-        glVertex2f(-0.6, -1.0)
-        glVertex2f(-0.8, -0.2)
-        glVertex2f(-0.3, 0.3)
-        glVertex2f(0.3, 0.3)
-        glVertex2f(0.8, -0.2)
-        glVertex2f(0.6, -1.0)
+        # 2. Draw mixing particles
+        glPointSize(5.0)
+        glBegin(GL_POINTS)
+        for p in self.particles:
+            alpha = 1.0 - (p.age / p.lifetime)
+            glColor4f(0.1, 0.5, 0.9, alpha)
+            glVertex2f(p.x, p.y)
         glEnd()
 
-        # LIQUID
-        r,g,b = self.get_solution_color()
-        h = min(0.9, self.liquid_level * 1.2)
-
-        glColor4f(r, g, b, 0.8)
-        glBegin(GL_POLYGON)
-        glVertex2f(-0.5, -1.0)
-        glVertex2f(-0.6, -1.0 + h)
-        glVertex2f(0.6, -1.0 + h)
-        glVertex2f(0.5, -1.0)
-        glEnd()
-
-        # DROPLETS
+        # 3. Draw droplets
         glColor3f(0.2, 0.6, 1.0)
         for drop in self.droplets:
             glBegin(GL_POLYGON)
             for i in range(12):
-                a = 2*math.pi*i/12
-                glVertex2f(0.0 + 0.03*math.cos(a), drop.y + 0.03*math.sin(a))
+                theta = 2 * math.pi * i / 12
+                glVertex2f(drop.x + 0.015 * math.cos(theta), 
+                          drop.y + 0.025 * math.sin(theta))
             glEnd()
 
-    def draw_cylinder(self, r, h, slices=32):
-        quad = gluNewQuadric()
-        gluCylinder(quad, r, r, h, slices, 1)
+        # 4. Draw flask outline
+        glColor3f(0.15, 0.15, 0.15)
+        glLineWidth(2.5)
+        
+        glBegin(GL_LINE_STRIP)
+        glVertex2f(-self.flask_neck_width/2, self.flask_neck_y)
+        glVertex2f(-self.flask_bottom_width/2, self.flask_bottom_y)
+        glVertex2f(self.flask_bottom_width/2, self.flask_bottom_y)
+        glVertex2f(self.flask_neck_width/2, self.flask_neck_y)
+        glEnd()
+        
+        # Flask neck
+        glBegin(GL_LINES)
+        glVertex2f(-self.flask_neck_width/2, self.flask_neck_y)
+        glVertex2f(-self.flask_neck_width/2, self.flask_neck_y + 0.15)
+        glVertex2f(self.flask_neck_width/2, self.flask_neck_y)
+        glVertex2f(self.flask_neck_width/2, self.flask_neck_y + 0.15)
+        glEnd()
 
-    def draw_sphere(self, r):
-        quad = gluNewQuadric()
-        gluSphere(quad, r, 20, 20)
+        # 5. Draw burette
+        burette_width = 0.045
+        burette_top = 0.85
+        
+        # Burette tube
+        glBegin(GL_LINE_LOOP)
+        glVertex2f(self.burette_tip_x - burette_width/2, self.burette_tip_y)
+        glVertex2f(self.burette_tip_x + burette_width/2, self.burette_tip_y)
+        glVertex2f(self.burette_tip_x + burette_width/2, burette_top)
+        glVertex2f(self.burette_tip_x - burette_width/2, burette_top)
+        glEnd()
+        
+        # Burette tip
+        glBegin(GL_LINE_STRIP)
+        glVertex2f(self.burette_tip_x - burette_width/2, self.burette_tip_y)
+        glVertex2f(self.burette_tip_x, self.burette_tip_y - 0.035)
+        glVertex2f(self.burette_tip_x + burette_width/2, self.burette_tip_y)
+        glEnd()
 
-    def mousePressEvent(self, event):
-        self.last_mouse_pos = event.pos()
-
-    def mouseMoveEvent(self, event):
-        if self.last_mouse_pos:
-            dx = event.x() - self.last_mouse_pos.x()
-            self.last_mouse_pos = event.pos()
-            self.update()
+        # 6. Draw stand and support
+        stand_x = 0.75
+        arm_y = 0.6
+        
+        # Horizontal support arm
+        glLineWidth(2)
+        glBegin(GL_LINES)
+        glVertex2f(self.burette_tip_x + burette_width/2, arm_y)
+        glVertex2f(stand_x, arm_y)
+        glEnd()
+        
+        # Clamp
+        glBegin(GL_LINE_STRIP)
+        glVertex2f(stand_x - 0.05, arm_y - 0.06)
+        glVertex2f(stand_x, arm_y - 0.06)
+        glVertex2f(stand_x, arm_y + 0.06)
+        glVertex2f(stand_x - 0.05, arm_y + 0.06)
+        glEnd()
+        
+        # Vertical stand
+        glLineWidth(5)
+        glBegin(GL_LINES)
+        glVertex2f(stand_x, -0.9)
+        glVertex2f(stand_x, 0.9)
+        glEnd()
+        
+        # Stand base
+        glLineWidth(4)
+        glBegin(GL_LINES)
+        glVertex2f(stand_x - 0.18, -0.9)
+        glVertex2f(stand_x + 0.18, -0.9)
+        glEnd()
 
     def toggle_valve(self):
         self.burette_valve_open = not self.burette_valve_open
@@ -471,11 +438,13 @@ class TitrationAnimation(QGLWidget):
     
     def toggle_indicator(self):
         self.indicator_active = not self.indicator_active
-    
+
     def toggle_reaction_type(self):
-        order = ["SA_SB", "WA_SB", "SA_WB", "WA_WB"]
-        i = order.index(self.reaction_type)
-        self.reaction_type = order[(i + 1) % len(order)]
+        self.reaction_index = (self.reaction_index + 1) % 4
+
+        mapping = ["SA_SB", "WA_SB", "SA_WB", "WA_WB"]
+        self.reaction_type = mapping[self.reaction_index]
+
         self.reset_animation()
 
     def set_parameters(self, acid_M, base_M, acid_vol):
@@ -488,10 +457,14 @@ class TitrationAnimation(QGLWidget):
         self.eq_volume_ml = (acid_M * acid_vol) / base_M
 
         self.reset_animation()
-
+    
     def reset_animation(self):
         self.mix_ratio = 0.0
-        self.ph_value = 1.0
+        rtype = self.reactions[self.reaction_index]
+        if "Weak Acid" in rtype:
+            self.ph_value = 3.0
+        else:
+            self.ph_value = 1.0
         self.liquid_level = 0.15
         self.total_drops = 0
         self.volume_ml = 0.0
@@ -616,8 +589,8 @@ class ControlPanel(QWidget):
         
         layout.addStretch()
         self.setLayout(layout)
-        
-        # Theory box
+
+         # Theory box
         self.theory_box = QLabel("")
         self.theory_box.setWordWrap(True)
         self.theory_box.setStyleSheet(
@@ -625,7 +598,7 @@ class ControlPanel(QWidget):
             "padding: 10px; border-radius: 6px; border: 1px solid #dcdde1;"
         )
         layout.addWidget(self.theory_box)
-
+        
         # Update timer
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_labels)
@@ -643,21 +616,13 @@ class ControlPanel(QWidget):
             self.btn_valve.setStyleSheet("QPushButton { background-color: #3498db; color: white; "
                                         "font-size: 14px; padding: 10px; border-radius: 5px; }"
                                         "QPushButton:hover { background-color: #2980b9; }")
-    
+            
     def toggle_reaction(self):
         self.animation.toggle_reaction_type()
 
-        rt = self.animation.reaction_type
-
-        if rt == "SA_SB":
-            self.btn_reaction.setText("Strong Acid vs Strong Base")
-        elif rt == "WA_SB":
-            self.btn_reaction.setText("Weak Acid vs Strong Base")
-        elif rt == "SA_WB":
-            self.btn_reaction.setText("Strong Acid vs Weak Base")
-        else:
-            self.btn_reaction.setText("Weak Acid vs Weak Base")
-
+        reaction = self.animation.reactions[self.animation.reaction_index]
+        self.btn_reaction.setText("Reaction: " + reaction)
+    
     def reset_experiment(self):
         self.animation.reset_animation()
         self.graph.reset()
@@ -677,7 +642,7 @@ class ControlPanel(QWidget):
         self.lbl_vol.setText(f"Acid Volume (mL): {vol}")
 
         self.animation.set_parameters(acid, base, vol)
-
+   
     def update_labels(self):
         self.lbl_ph.setText(f"pH: {self.animation.ph_value:.2f}")
         self.lbl_drops.setText(f"Drops: {self.animation.total_drops}")
@@ -738,10 +703,10 @@ class MainWindow(QMainWindow):
         self.controls = ControlPanel(self.animation, self.graph)
         
         # Add widgets to layout
-        main_layout.addWidget(self.controls, 2)
-        main_layout.addWidget(self.animation, 5)
-        main_layout.addWidget(self.graph, 5)
-
+        main_layout.addWidget(self.controls, 1)
+        main_layout.addWidget(self.animation, 2)
+        main_layout.addWidget(self.graph, 2)
+        
         self.setCentralWidget(container)
         
         # Set initial drop rate
